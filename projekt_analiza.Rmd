@@ -1,0 +1,311 @@
+---
+title: "Analiza wyników i przewagi własnego boiska w meczach Ekstraklasy (1927-2025)"
+author: "Weronika Czyż"
+date: "2026-01-15"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE, warning = FALSE)
+```
+
+## Wprowadzenie
+Zbiór danych zawiera 19232 rekordy z 10 atrybutami typu kategorycznego, numerycznego, porządkowego i binarnego.Każdy wpis z wybranego przeze mnie zbioru danych przedstawia rozegrany mecz Ekstraklasy.
+
+## Zmienne
+- Kolejka (porządkowe)  
+- Sezon (numeryczne)  
+- Drużyna gospodarzy (tekst, nazwa drużyny)  
+- Drużyna gości (tekst, nazwa drużyny)  
+- Data (czasowe)  
+- Godzina (czasowe)  
+- Gole gospodarzy (numeryczne)  
+- Gole gości (numeryczne)  
+- Czy odwołany (binarne, 0=nie, 1=tak)  
+- Czy walkower (binarne, 0=nie, 1=tak)  
+
+# Wykorzystane pakiety
+```{r, message = FALSE, warning = FALSE}
+library(tidyverse)
+library(lubridate)
+library(mice)
+library(dplyr)
+library(ggplot2)
+library(knitr)
+library(psych)
+```
+
+## Wczytanie danych
+```{r}
+ekstraklasa <- read.csv("poland_2.csv", stringsAsFactors = FALSE, fileEncoding = "Latin2")
+```
+
+```{r}
+head(ekstraklasa,5)
+tail(ekstraklasa,5)
+str(ekstraklasa)
+```
+
+## Braki danych
+```{r}
+md.pattern(ekstraklasa)
+```
+
+W zestawie nie występują braki danych.
+
+## Czyszczenie danych
+Zmieniam typ zmiennych tam gdzie jest to konieczne, aby usprawnić strukturę
+```{r}
+ekstraklasa <- ekstraklasa %>%
+  mutate(
+    data = as.Date(date, format = "%d/%m/%Y"),
+    sezon = as.factor(season),
+    kolejka = as.numeric(Kolejka),
+    gole_gospodarzy = as.numeric(gh),
+    gole_gosci = as.numeric(ga),
+    anulowany = as.logical(IsCancelled),
+    walkower = as.logical(IsWalkover)
+  ) %>%
+  filter(!anulowany, !walkower) %>%
+  mutate(
+    suma_goli = gole_gospodarzy + gole_gosci,
+    roznica_goli = gole_gospodarzy - gole_gosci,
+    dekada = floor(year(data) / 10) * 10,
+    miesiac = month(data))
+```
+
+```{r}
+summary(ekstraklasa)
+ekstraklasa %>% 
+  select(gole_gospodarzy, gole_gosci, sezon) %>% 
+  describe()
+```
+
+## Problem 1: Przewaga własnego boiska
+Jakie znaczenie na przestrzeni dekad miało rozgrywanie meczu na swoim boisku, przed swoją publicznością?
+```{r}
+dane_dekady <- ekstraklasa %>%
+  group_by(dekada) %>%
+  summarise(gole_gosp = mean(gole_gospodarzy, na.rm = TRUE),
+            gole_gosc = mean(gole_gosci, na.rm = TRUE))
+
+plot(dane_dekady$dekada, dane_dekady$gole_gosp,
+     type = "b",
+     pch = 19,
+     col = "steelblue",
+     ylim = range(dane_dekady[, 2:3]),
+     xlab = "Dekada",
+     ylab = "Średnia liczba goli",
+     main = "Średnia liczba goli gospodarzy i gości")
+
+lines(dane_dekady$dekada,
+      dane_dekady$gole_gosc,
+      type = "b",
+      pch = 17,
+      col = "pink")
+legend(  "topright",
+         legend = c("Gospodarze", "Goście"),
+         col = c("steelblue", "pink"),
+         pch = c(19, 17),
+         bty = "n")
+```
+
+Możemy odczytać z wykresu, że na przestrzeni dekad gospodarze przeciętnie zdobywali więcej bramek niż drużyny gości, co wskazuje na istnienie przewagi własnego boiska. Różnica nie jest jednak stała w czasie, czyli jej skala zmienia się wraz z ewolucją ligi.
+
+## Problem 2: Zmiany liczby bramek na mecz w czasie
+```{r}
+srednia_goli <- ekstraklasa %>%
+  group_by(dekada) %>%
+  summarise(suma_goli = mean(suma_goli, na.rm = TRUE))
+
+plot(srednia_goli$dekada, srednia_goli$suma_goli,
+     type = "o",
+     col = "green",
+     xlab = "Dekada",
+     ylab = "Średnia liczba bramek",
+     main = "Średnia liczba bramek na mecz")
+```
+
+Z wykresu dowiadujemy się, że początki Ekstraklasy były znacznie obfitsze w bramki niż w ostatnich dekadach. Może to świadczyć o zmianach stylu gry lub / i regulaminów rozgrywek. Ekstraklasa stała się ligą bardziej defensywną niż na początku. Ciekawy jest też pewien moment widoczny dobrze na wykresie - w okolicach lat 70 średnia liczba bramek osiągneła swoje minimum, po czym z dekady na dekade zaczęła wzrastać. Było to zbieżne ze światowymi trendami rygorystycznej obrony.
+
+## Problem 3: Czy remisy były kiedyś częstsze niż obecnie?
+```{r}
+ekstraklasa$remis <- ekstraklasa$gole_gospodarzy == ekstraklasa$gole_gosci
+
+remisy_dekady <- ekstraklasa %>%
+  group_by(dekada) %>%
+  summarise(odsetek_remisow = mean(remis, na.rm = TRUE))
+
+plot(
+  remisy_dekady$dekada,
+  remisy_dekady$odsetek_remisow,
+  type = "b",
+  col = "darkred",
+  xlab = "Dekada",
+  ylab = "Odsetek remisów",
+  main = "Zmiany częstości remisów w Ekstraklasie"
+)
+```
+
+Wykres pokazał, że wręcz przeciwnie - częstotliwość remisów raczej rośnie z każdą kolejną dekadą - co znowu potwierdza, że Ekstraklasa z biegiem czasu stawała się bardziej defensywną ligą. W okolicach 2000 widzimy jednak nagły spadek. Była to (lekko opóźniona) reakcja na zmiane systemu punktowania meczów - zwycięstwo dawało od teraz 3 punkty (wcześniej 2). Opłacało się więc zaryzykować porażkę byle powalczyć o wygraną.
+
+## Problem 4: Jak zmieniała się częstość wysokich zwyciestw np. różnica ponad 3 goli
+```{r}
+ekstraklasa$wysokie <- abs(ekstraklasa$gole_gospodarzy - ekstraklasa$gole_gosci) >= 3
+
+wykres_dane <- ekstraklasa %>%
+  group_by(dekada) %>%
+  summarise(odsetek = mean(wysokie, na.rm = TRUE))
+
+barplot(wykres_dane$odsetek, 
+        names.arg = wykres_dane$dekada, 
+        las = 2, col = "darkgreen",
+        main = "Odsetek meczów z wysokim zwycięstwem")
+```
+
+Odsetek wysokich zwycięstw tzn. różnica 3 lub więcej goli, od początku istnienia Ekstraklasy do około 1970 drastycznie spadał, co potwierdza zmiany stylu gry w tamtym czasie - z mocno ofensywnego na "dojrzalszą" defensywną piłkę. Od lat 70 (czyli od zmiany zasad punktacji) odsetek zaczął lekko wzrastać, jednak nowe zasady spotkały się z dużą krytyką, a wraz z ich zmianą odsetek lekko spadł / utrzymuje się.
+
+## Problem 5: Walkowery i odwołane mecze - kiedy występowały najczęściej?
+```{r}
+dane <- read.csv("poland_2.csv") 
+
+dane_wo <- dane %>%
+  mutate(n_season = as.numeric(season),
+    dekada = floor(n_season / 10) * 10) %>% 
+  group_by(dekada) %>%
+  summarise(
+    walkowery = sum(as.logical(IsWalkover) == 1, na.rm = TRUE),
+    anulowane = sum(as.logical(IsCancelled) == 1, na.rm = TRUE))
+
+plot(dane_wo$dekada, dane_wo$walkowery, 
+     type = "o", col = "blue", pch = 16,
+     ylim = c(0, 60), 
+     xlab = "Dekada", ylab = "Liczba zdarzeń",
+     main = "Problemy w meczach wg dekad")
+
+lines(dane_wo$dekada, dane_wo$anulowane, 
+      type = "o", col = "red", pch = 17)
+
+legend("topright", legend = c("Walkowery", "Anulowane"), 
+       col = c("blue", "red"), lty = 1, pch = c(16, 17))
+```
+
+Walkowery i odwołane mecze występowały najczesciej na początku histori rozgrywek Ekstraklasy - słabsza organizacja rozgrywek, mniejsza stabilność klubów.
+
+## Problem 6: Czy kolejka wpływa na wynik meczu?
+Czy w końcowych kolejkach pada więcej bramek niż na początku sezonu?
+```{r}
+kolejki <- ekstraklasa %>%
+  group_by(kolejka) %>%
+  summarise(srednia_goli = mean(suma_goli, na.rm = TRUE))
+
+stripchart(
+  srednia_goli ~ kolejka,
+  data = kolejki,
+  pch = 19,
+  col = "darkblue",
+  vertical = TRUE,
+  xlab = "Kolejka",
+  ylab = "Średnia liczba goli",
+  main = "Zróżnicowanie liczby goli w kolejnych kolejkach"
+)
+```
+
+Na wykresie widzimy wyraźny wzrost średniej liczby goli w ostatnich kolejkach sezonu. Walka o ostatnie punkty i dobre miejsce w tabeli motywuje drużyny pod koniec sezonu do strzelania większej ilości goli.
+
+## Problem 7: Godzina meczu a liczba bramek
+Czy godzina meczu może mieć wpływ na jego wynik i liczbę padających w nim bramek?
+```{r}
+ekstraklasa$hour <- as.numeric(substr(ekstraklasa$hour, 1, 2))
+
+ekstraklasa$pora_dnia <- factor(
+  ifelse(ekstraklasa$hour < 13, "wczesne",
+  ifelse(ekstraklasa$hour >= 13 & ekstraklasa$hour < 16, "popołudniowe",
+  ifelse(ekstraklasa$hour >= 16 & ekstraklasa$hour < 19, "wieczorne", "późne"))))
+
+ekstraklasa$pora_dnia <- factor(ekstraklasa$pora_dnia, 
+                                levels = c("wczesne", "popołudniowe", "wieczorne", "późne"))
+
+boxplot(
+  suma_goli ~ pora_dnia,
+  data = ekstraklasa,
+  col = "lightblue",
+  xlab = "Pora dnia",
+  ylab = "Liczba goli",
+  main = "Liczba bramek w zależności od pory dnia")
+```
+
+
+## Problem 8: Stabilność ligi - czy różnice bramkowe zmniejszyły się na przestrzeni lat?
+```{r}
+srednia_roznica <- aggregate(
+  roznica_goli ~ dekada,
+  data = ekstraklasa,
+  mean,
+  na.rm = TRUE
+)
+
+plot(
+  srednia_roznica$dekada,
+  srednia_roznica$roznica_goli,
+  type = "l",
+  pch = 19,
+  col = "pink",
+  xlab = "Dekada",
+  ylab = "Średnia różnica bramek",
+  main = "Zmiany średniej różnicy bramek w czasie")
+```
+
+Widzimy tendencje do stabilizacji wyników – średnia różnica bramek w ostatnich dekadach jest niższa niż w początkowych latach rozgrywek. Możemy zakładać wyrównanie poziomu sportowego drużyn oraz jak poprzednio, trend bardziej defensywnej gry.
+
+## Problem 9: Sezonowość bramek - czy pora roku wpływa na liczbe strzelanych goli / wyniki meczy?
+```{r}
+ekstraklasa$date <- as.Date(ekstraklasa$date)
+
+ekstraklasa <- ekstraklasa %>%
+  mutate(
+    miesiac = as.numeric(format(date, "%m")),
+    pora_roku = ifelse(miesiac %in% c(12, 1, 2), "zima",
+                ifelse(miesiac %in% c(3, 4, 5), "wiosna",
+                ifelse(miesiac %in% c(6, 7, 8), "lato", "jesien"))),
+    pora_roku = factor(pora_roku, levels = c("wiosna", "lato", "jesien", "zima"))
+  )
+
+boxplot(
+  suma_goli ~ pora_roku,
+  data = ekstraklasa,
+  col = "lightgreen",
+  xlab = "Pora roku",
+  ylab = "Liczba goli",
+  main = "Sezonowość liczby bramek")
+```
+
+Na podstawie wykresu pudełkowego można zauważyć umiarkowane różnice w liczbie strzelanych bramek w zależności od pory roku. Lato - najwyższa mediana liczby goli, co sugeruje, że w tym okresie mecze są przeciętnie bardziej bramkowe. Wiosna i jesień - większa zmienność liczby bramek, co potwierdzają szersze pudełka oraz liczne obserwacje odstające. Zima - najniższa mediana oraz najmniejsza zmienność liczby goli, co może być związane z trudniejszymi warunkami atmosferycznymi. Pora roku wydaje sie mieć pewien wpływ na przebieg meczów, jednak różnice nie są na tyle wyraźne, aby jednoznacznie stwierdzić silną sezonowość liczby strzelanych bramek.
+
+## Problem 10: Czy Ekstraklasa "dojrzała" statystycznie - jest bardziej przewidywalna?
+```{r}
+ekstraklasa$wyrownany <- ekstraklasa$roznica_goli <= 1
+
+wyrownane_dekady <- aggregate(
+  wyrownany ~ dekada,
+  data = ekstraklasa,
+  mean,
+  na.rm = TRUE
+)
+
+plot(
+  wyrownane_dekady$dekada,
+  wyrownane_dekady$wyrownany,
+  type = "b",
+  pch = 17,
+  col = "blue",
+  xlab = "Dekada",
+  ylab = "Udział meczów wyrównanych",
+  main = "Zmiany przewidywalności meczów Ekstraklasy"
+)
+```
+
+Udział meczów zakończonych niewielką różnicą bramek wzrasta w nowszych dekadach. Może to sugerować większą taktyczność gry oraz wyrównanie poziomu zespołów.
+
+# Podsumowanie
+Na podstawie przeprowadzonej analizy można zauważyć, że charakter rozgrywek Ekstraklasy zmieniał się na przestrzeni lat. Widoczna jest przewaga własnego boiska, choć jej skala różni się w zależności od okresu historycznego. Zmieniała się również liczba bramek na mecz oraz częstość wysokich zwycięstw. Analiza potwierdza, że dane historyczne ligi pozwalają na formułowanie interesujących wniosków dotyczących ewolucji stylu gry i wyrównania poziomu sportowego.
